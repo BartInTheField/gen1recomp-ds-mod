@@ -37,7 +37,7 @@ return function(mod)
     local w, h = canvas:getWidth(), canvas:getHeight()
     if not frozen.canvas or frozen.w ~= w or frozen.h ~= h then
       if frozen.canvas and frozen.canvas.release then frozen.canvas:release() end
-      frozen.canvas = love.graphics.newCanvas(w, h)
+      frozen.canvas = love.graphics.newCanvas(w, h, { dpiscale = 1 })
       frozen.canvas:setFilter("nearest", "nearest")
       frozen.w, frozen.h = w, h
     end
@@ -112,7 +112,7 @@ return function(mod)
       local w, h = canvas:getWidth(), canvas:getHeight()
       if not shaded.canvas or shaded.w ~= w or shaded.h ~= h then
         if shaded.canvas and shaded.canvas.release then shaded.canvas:release() end
-        shaded.canvas = love.graphics.newCanvas(w, h)
+        shaded.canvas = love.graphics.newCanvas(w, h, { dpiscale = 1 })
         shaded.canvas:setFilter("nearest", "nearest")
         shaded.w, shaded.h = w, h
       end
@@ -123,7 +123,10 @@ return function(mod)
       love.graphics.setCanvas()
       local ok, img = pcall(function() return shaded.canvas:newImageData() end)
       if ok and img then
-        pcall(ss.push, img, w, h)
+        -- push the ImageData's own pixel dims: with dpiscale=1 they equal
+        -- w x h, and they are what the buffer's row stride matches (a
+        -- dpiscale>1 canvas would read back larger and shear on the wire).
+        pcall(ss.push, img, img:getWidth(), img:getHeight())
         if img.release then img:release() end
       end
     end

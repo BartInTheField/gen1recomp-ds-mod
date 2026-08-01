@@ -18,19 +18,32 @@ local function check(cond, msg)
 end
 
 -- ---- love.graphics stub ------------------------------------------------
-local function newCanvas(w, h)
+-- a device DPI > 1 (like the AYN Thor).  A canvas created WITHOUT dpiscale=1
+-- allocates a texture at logical*DPI, and newImageData reads back those pixel
+-- dims while getWidth/getHeight still report the logical size -- the exact
+-- stride mismatch that sheared the second screen.
+local FAKE_DPI = 2.755
+local newCanvases = {}
+local function newCanvas(w, h, settings)
+  local ds = settings and settings.dpiscale
   local c
   c = {
-    w = w, h = h,
+    w = w, h = h, dpiscale = ds,
     getWidth = function() return c.w end,
     getHeight = function() return c.h end,
     setFilter = function() end,
     release = function() end,
     newImageData = function()
-      return { w = c.w, h = c.h, release = function() end,
+      local pw = (ds == 1) and c.w or math.floor(c.w * FAKE_DPI + 0.5)
+      local ph = (ds == 1) and c.h or math.floor(c.h * FAKE_DPI + 0.5)
+      return { w = pw, h = ph,
+               getWidth = function() return pw end,
+               getHeight = function() return ph end,
+               release = function() end,
                getFFIPointer = function() return nil end }
     end,
   }
+  newCanvases[#newCanvases + 1] = c
   return c
 end
 local G = { target = nil }
@@ -97,6 +110,7 @@ local ctx = {
   secondScreen = secondScreen,
 }
 
+local baseCanvas = #newCanvases  -- fixtures above stand in for engine PixelCanvases
 local handled = hooks["render.compose"](function() return false end, renderer, ctx)
 check(handled == true, "the mod takes over composition (returns true)")
 
@@ -113,6 +127,16 @@ check(shadedUiBlit ~= nil,
   "the UI is blitted into an offscreen canvas (palette shader applied) before push")
 check(shadedUiBlit.zones == zones,
   "the shaded UI blit carries the SGB zones so colours are baked in")
+
+-- (1b) dpi stride: the pushed image must be a native 160x144 (not logical*DPI),
+-- which only holds if every offscreen canvas is allocated with dpiscale=1 --
+-- the fix for the sheared second screen on high-DPI Android.
+check(pushed[1].w == 160 and pushed[1].h == 144,
+  "pushed image is native 160x144 on a DPI>1 device (no row-stride shear)")
+for i = baseCanvas + 1, #newCanvases do
+  check(newCanvases[i].dpiscale == 1,
+    "every mod-owned offscreen canvas is created with dpiscale=1")
+end
 
 -- (2) layout: the world screen fills the main panel (blitted to the window,
 -- target == nil) at the panel-fit scale 3, not the in-window stack scale

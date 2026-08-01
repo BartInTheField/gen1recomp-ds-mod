@@ -58,6 +58,12 @@ render.compose (engine seam)
   - on a second-display device each physical panel holds one screen — the main
     panel is filled with the top (world) screen rather than the whole two-screen
     stack, and the bottom (UI) screen goes to the second display.
+- **0.1.2 fix (high-DPI Android):** the second screen was sheared into
+  horizontal stripes because the offscreen canvas the UI is shaded into was
+  allocated at the device DPI (e.g. 160×144 → ~441×397 pixels) while the push
+  reported the logical 160×144 — a row-stride mismatch. The mod now allocates
+  its offscreen canvases with `dpiscale = 1` and pushes the image's own pixel
+  dimensions. (Desktop was unaffected: `dpiscale` is 1 there.)
 - **Not yet ported:** the DS-native battle *split* (battlefield on top, command/
   move/text window on bottom) is a follow-up layout on top of this base stacking.
 
