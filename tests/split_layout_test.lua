@@ -140,31 +140,49 @@ end
 check(uiStacked ~= nil and uiStacked.boxX == vBox.ox,
   "stacked: ui is drawn into the vertical ui box")
 
--- ---- (3) options-row gating --------------------------------------------
-local function splitRow()
+-- ---- (3) single cycling options row: no menu re-entry needed -----------
+local function dsRow()
   local out = hooks["ui.options.rows"](function() return {} end, {}, {})
   for _, r in ipairs(out) do
-    if r.id == "gen1recomp_ds_split" then return r end
+    if r.id == "gen1recomp_ds" then return r end
   end
   return nil
 end
 
--- single display, dual screen on: the split row is offered
+-- single display: presses cycle OFF -> STACKED -> SIDE BY SIDE -> OFF, and the
+-- split becomes reachable the moment dual screen turns on -- all without
+-- leaving the menu (the row is always present; only value/activate are live)
 mod.secondScreen = singleScreen
-check(splitRow() ~= nil, "gating: DS SPLIT row is offered on a single display")
-
--- dual screen off: no split row (setting only makes sense when DS is on)
 saved.enabled = false
-check(splitRow() == nil, "gating: DS SPLIT row is hidden when dual screen is off")
-saved.enabled = true
+saved.sideBySide = false
+local row = dsRow()
+check(row ~= nil, "cycle: the dual-screen row is always present")
+check(row.value() == "OFF", "cycle: starts OFF")
+row.activate()
+check(row.value() == "STACKED", "cycle: OFF -> STACKED without re-entry")
+row.activate()
+check(row.value() == "SIDE BY SIDE", "cycle: STACKED -> SIDE BY SIDE without re-entry")
+check(saved.sideBySide == true, "cycle: SIDE BY SIDE sets the orientation flag")
+row.activate()
+check(row.value() == "OFF" and saved.enabled == false, "cycle: SIDE BY SIDE -> OFF")
 
--- a second physical display is attached: the split row is hidden
+-- second physical display: the split is unreachable; the row only toggles ON/OFF
 mod.secondScreen = {
   available = function() return true end,
   setEnabled = function() end, push = function() end,
 }
-check(splitRow() == nil,
-  "gating: DS SPLIT row is hidden when a second physical display is attached")
+saved.enabled = false
+saved.sideBySide = false
+local row2 = dsRow()
+check(row2.value() == "OFF", "2nd display: starts OFF")
+row2.activate()
+check(row2.value() == "ON", "2nd display: OFF -> ON (no split state)")
+row2.activate()
+check(row2.value() == "OFF", "2nd display: ON -> OFF")
+saved.enabled = true
+saved.sideBySide = true
+check(dsRow().value() == "ON",
+  "2nd display: a saved split flag is ignored (shows ON, never SIDE BY SIDE)")
 
 print(string.format("split_layout_test: %d checks passed", calls))
 end)

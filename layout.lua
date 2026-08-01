@@ -20,10 +20,6 @@ function Layout.surfaceSize(orientation, w, h)
   return w, h * 2 + Layout.GAP
 end
 
--- regions in framebuffer pixels: the integer scale plus the two screen boxes.
--- pw/ph are the framebuffer pixel size of the window.  orientation is
--- "vertical" (world on top, ui below -- the default) or "horizontal" (world
--- left, ui right).
 function Layout.regions(pw, ph, orientation, w, h)
   w = w or Layout.W
   h = h or Layout.H

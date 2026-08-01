@@ -43,10 +43,6 @@ return function(mod)
     mod.save:set("enabled", on and true or false)
   end
 
-  -- second persisted toggle: lay the two screens out SIDE BY SIDE (world left,
-  -- ui right) instead of stacked.  Only meaningful in the single-window path;
-  -- the second-physical-display path ignores it (world fills the panel, ui is
-  -- pushed to the other display), which is why the row is hidden there.
   local function sideBySide()
     return mod.save:get("sideBySide") == true
   end
@@ -54,9 +50,6 @@ return function(mod)
     mod.save:set("sideBySide", on and true or false)
   end
 
-  -- a second physical display is attached (Android Presentation).  Learned
-  -- from the render.compose ctx and stashed on the mod so the OPTIONS row can
-  -- see it; nil/absent bridge means single display.
   local function secondDisplayAttached()
     local ss = mod.secondScreen
     return (ss and ss.available and ss.available()) and true or false
@@ -150,41 +143,45 @@ return function(mod)
     return battleSurf.canvas, DualBattle.zones()
   end
 
-  -- OPTIONS row: DUAL SCREEN (ON / OFF).  Decorate the list after next() so
-  -- every other mod's rows survive.
+  -- OPTIONS row cycles dual screen off / stacked / side-by-side in one row: the
+  -- engine builds the row array once, so a separate split row would not appear
+  -- until the menu is reopened.  Side-by-side is skipped when a second physical
+  -- display drives the UI, where the split has no meaning.
   mod.hooks:wrap("ui.options.rows", function(next, game, rows)
     local out = next(game, rows)
     if type(out) ~= "table" then return out end
     out[#out + 1] = {
       id = "gen1recomp_ds",
       label = "DUAL SCREEN",
-      value = function() return enabled() and "ON" or "OFF" end,
+      value = function()
+        if not enabled() then return "OFF" end
+        if secondDisplayAttached() then return "ON" end
+        return sideBySide() and "SIDE BY SIDE" or "STACKED"
+      end,
       activate = function()
-        setEnabled(not enabled())
+        if secondDisplayAttached() then
+          setEnabled(not enabled())
+        elseif not enabled() then
+          setEnabled(true)
+          setSideBySide(false)
+        elseif not sideBySide() then
+          setSideBySide(true)
+        else
+          setEnabled(false)
+        end
         local ss = mod.secondScreen
         if ss and ss.setEnabled then ss.setEnabled(enabled()) end
       end,
     }
-    -- SPLIT LAYOUT (STACKED / SIDE BY SIDE): only when dual screen is on and
-    -- no second physical display is attached (on such a device the split has
-    -- no meaning, so the row is not offered).
-    if enabled() and not secondDisplayAttached() then
-      out[#out + 1] = {
-        id = "gen1recomp_ds_split",
-        label = "DS SPLIT",
-        value = function() return sideBySide() and "SIDE BY SIDE" or "STACKED" end,
-        activate = function() setSideBySide(not sideBySide()) end,
-      }
-    end
     return out
   end)
 
   -- the seam: lay the two passes out as two stacked screens, or hand control
   -- back to the engine when the mod is off.
   mod.hooks:wrap("render.compose", function(next, renderer, ctx)
+    mod.secondScreen = ctx.secondScreen
     if not enabled() then return next() end
 
-    mod.secondScreen = ctx.secondScreen
     local ss = ctx.secondScreen
     local physical = ss and ss.available and ss.available()
     if ss and ss.setEnabled then ss.setEnabled(true) end
@@ -302,8 +299,6 @@ return function(mod)
         pushSecond(ctx.uiCanvas, ctx.zones)
       end
     else
-      -- single display: place the two screens in the one window, stacked or
-      -- side by side per the DS SPLIT setting
       local orientation = sideBySide() and "horizontal" or "vertical"
       local scale, world, ui = Layout.regions(ctx.pw, ctx.ph, orientation)
       if bsurf then
