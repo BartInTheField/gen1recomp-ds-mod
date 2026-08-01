@@ -46,31 +46,26 @@ render.compose (engine seam)
    └── this mod: layout.lua (geometry) + blitCanvas (draw) + secondScreen (push)
 ```
 
-## Status
+## Status (1.0.0)
 
-- **Working:** desktop (Linux) in-window stacking, verified live. The
-  single-display and second-display code paths are unit-checked in
-  `tests/second_screen_color_test.lua` (run: `luajit tests/second_screen_color_test.lua`).
-- **0.1.1 fix (second physical display, e.g. AYN Thor):**
-  - the bottom screen now respects the colour scheme — the UI is drawn through
-    the engine's palette shader (`Renderer:blitCanvas`) into an offscreen canvas
-    before it is pushed, instead of pushing the raw un-colourised DMG canvas;
-  - on a second-display device each physical panel holds one screen — the main
-    panel is filled with the top (world) screen rather than the whole two-screen
-    stack, and the bottom (UI) screen goes to the second display.
-- **0.1.2 fix (high-DPI Android):** the second screen was sheared into
-  horizontal stripes because the offscreen canvas the UI is shaded into was
-  allocated at the device DPI (e.g. 160×144 → ~441×397 pixels) while the push
-  reported the logical 160×144 — a row-stride mismatch. The mod now allocates
-  its offscreen canvases with `dpiscale = 1` and pushes the image's own pixel
-  dimensions. (Desktop was unaffected: `dpiscale` is 1 there.)
-- **0.1.3 fix (top-screen centring + wide aspect):** the world pass canvas is
-  window-view-sized (`Renderer:worldViewSize` = `ceil(pw/scale) × ceil(ph/scale)`),
-  so drawing it into a fixed 160×144 box showed only the top-left crop —
-  off-centre on any non-GB-multiple panel (the Thor). On a second display the
-  world now fills the whole main panel, centred, preserving the wide aspect
-  (like normal single-screen mode); in the in-window stack the wide world is
-  centre-cropped into its screen box so the player stays centred.
+First stable release. Verified live on desktop (Linux) and on second-display
+Android hardware (AYN Thor). The single-display and second-display code paths
+are unit-checked in `tests/second_screen_color_test.lua`
+(run: `luajit tests/second_screen_color_test.lua`).
+
+- **In-window stack (single display):** the world and UI render as two stacked
+  160×144 screens with a gutter. The window-view-sized world pass is
+  centre-cropped into its screen box so the player stays centred at any window
+  size.
+- **Second physical display (e.g. AYN Thor):** the main panel is filled with the
+  world — centred, at the fit scale, preserving the wide aspect like normal
+  single-screen mode — and the UI screen is driven onto the second display.
+- **Colour-correct second screen:** the UI is drawn through the engine's palette
+  shader (`Renderer:blitCanvas`) into an offscreen canvas before it is pushed, so
+  the second display carries the SGB/GBC colour scheme.
+- **High-DPI safe:** the mod's offscreen canvases are allocated with
+  `dpiscale = 1` and pushed at their native pixel size, so the second screen is
+  not sheared on high-DPI Android.
 - **Not yet ported:** the DS-native battle *split* (battlefield on top, command/
   move/text window on bottom) is a follow-up layout on top of this base stacking.
 
