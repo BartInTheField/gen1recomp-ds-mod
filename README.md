@@ -1,5 +1,9 @@
 # Dual Screen (DS-style) — a gen1recomp mod
 
+   | Overworld | Battle |
+   |:---:|:---:|
+   | <img width="325" alt="image" src="https://github.com/user-attachments/assets/dbcdee1c-ce5c-4767-b82c-a801045b60f2" /> | <img width="325" alt="image" src="https://github.com/user-attachments/assets/1a2f7339-0a64-4185-ad3d-4e9688e0a8c1" /> |
+
 Renders the game as two stacked Game Boy screens, DS-style: the **overworld on
 the top screen**, every **UI layer on the bottom screen** (text boxes, the START
 menu, shops, the PC, battles), with a small black gutter between them. On
