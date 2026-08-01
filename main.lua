@@ -171,6 +171,15 @@ return function(mod)
       place(ctx.uiCanvas, ctx.zones, ui, scale)
     end
 
+    -- warp/area fade: the engine paints renderer.worldFadeAlpha over its
+    -- composite, but that path is skipped once the hook returns true.
+    local fade = renderer.worldFadeAlpha
+    if fade and fade > 0 then
+      love.graphics.setColor(0, 0, 0, fade)
+      love.graphics.rectangle("fill", 0, 0, ctx.ww, ctx.wh)
+      love.graphics.setColor(1, 1, 1, 1)
+    end
+
     return true
   end)
 end

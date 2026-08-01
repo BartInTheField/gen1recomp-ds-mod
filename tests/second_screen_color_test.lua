@@ -46,16 +46,20 @@ local function newCanvas(w, h, settings)
   newCanvases[#newCanvases + 1] = c
   return c
 end
-local G = { target = nil }
+local G = { target = nil, color = { 1, 1, 1, 1 } }
+local rects = {}
 love = {
   graphics = {
     newCanvas = newCanvas,
     setCanvas = function(c) G.target = c end,
     clear = function() end,
-    setColor = function() end,
+    setColor = function(r, g, b, a) G.color = { r, g, b, a or 1 } end,
     setShader = function() end,
     setScissor = function() end,
-    rectangle = function() end,
+    rectangle = function(mode, x, y, w, h)
+      rects[#rects + 1] = { mode = mode, x = x, y = y, w = w, h = h,
+                            color = G.color, target = G.target }
+    end,
     draw = function() end,
   },
 }
@@ -188,6 +192,41 @@ check(worldStacked ~= nil and worldStacked.bx < worldStacked.boxX,
   "single display: the wide world is centre-cropped in the box, not top-left")
 check(uiStacked ~= nil and uiStacked.boxW == uiBox.w and uiStacked.bx == uiStacked.boxX,
   "single display: the 160x144 UI stacks with no crop offset")
+
+-- ---- warp/area transition fade -------------------------------------------
+-- Transition:draw hands its alpha to renderer.worldFadeAlpha when the world
+-- pass ran, and the engine paints it over the whole composite -- a path the
+-- engine skips once this hook returns true.  The mod must redraw it, or the
+-- little area-transition fade vanishes on the DS layout (bug: fade missing).
+rects = {}
+renderer.worldFadeAlpha = 0.5
+local handled3 = hooks["render.compose"](function() return false end, renderer, ctx)
+check(handled3 == true, "fade: the mod still takes over composition")
+local fadeRect = nil
+for _, r in ipairs(rects) do
+  if r.mode == "fill" and r.target == nil and r.x == 0 and r.y == 0
+     and r.w == ctx.ww and r.h == ctx.wh
+     and r.color[1] == 0 and r.color[2] == 0 and r.color[3] == 0
+     and r.color[4] == 0.5 then
+    fadeRect = r
+  end
+end
+check(fadeRect ~= nil,
+  "fade: a black full-window overlay at the fade alpha is drawn over the DS layout")
+
+-- cleared each frame by the engine: no alpha means no veil, so the mod draws none
+rects = {}
+renderer.worldFadeAlpha = nil
+hooks["render.compose"](function() return false end, renderer, ctx)
+local strayVeil = false
+for _, r in ipairs(rects) do
+  if r.mode == "fill" and r.target == nil and r.w == ctx.ww and r.h == ctx.wh
+     and r.color[1] == 0 and r.color[2] == 0 and r.color[3] == 0
+     and r.color[4] ~= 1 then
+    strayVeil = true
+  end
+end
+check(not strayVeil, "fade: no partial-alpha veil is drawn when worldFadeAlpha is unset")
 
 print(string.format("second_screen_color_test: %d checks passed", calls))
 end)
