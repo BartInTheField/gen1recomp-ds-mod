@@ -24,7 +24,10 @@ is inert — nothing breaks, dual screen just isn't available.
 
 Drop the folder into the game's `mods/` directory (or install through the mod
 manager). Toggle it in **Options → DUAL SCREEN (ON / OFF)**; the choice is
-persisted per-save through `mod.save`.
+persisted per-save through `mod.save`. With dual screen on, **Options → DS SPLIT
+(STACKED / SIDE BY SIDE)** chooses whether the two screens are stacked (world on
+top) or placed next to each other (world left, UI right). That row is hidden
+when a second physical display is attached, where the split has no meaning.
 
 ## How it works
 
@@ -57,6 +60,10 @@ are unit-checked in `tests/second_screen_color_test.lua`
   160×144 screens with a gutter. The window-view-sized world pass is
   centre-cropped into its screen box so the player stays centred at any window
   size.
+- **In-window split orientation (single display):** with **DS SPLIT = SIDE BY
+  SIDE** the two 160×144 screens are laid out left/right (world left, UI right)
+  instead of stacked, both integer-scaled to fit the window. Offered only on a
+  single display; ignored when a second physical display drives the UI.
 - **Second physical display (e.g. AYN Thor):** the main panel is filled with the
   world — centred, at the fit scale, preserving the wide aspect like normal
   single-screen mode — and the UI screen is driven onto the second display.
@@ -74,5 +81,5 @@ are unit-checked in `tests/second_screen_color_test.lua`
 | module | role |
 |---|---|
 | `manifest.json` | mod metadata (`id: gen1recomp_ds`, api 2) |
-| `layout.lua` | pure two-screen geometry (`regions`, `surfaceSize`, `screenAt`) |
+| `layout.lua` | pure two-screen geometry, stacked or side-by-side (`regions`, `surfaceSize`, `screenAt`) |
 | `main.lua` | options row + `render.compose` hook (stacking, freeze, second display) |

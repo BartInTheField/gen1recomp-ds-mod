@@ -29,6 +29,25 @@ return function(mod)
     mod.save:set("enabled", on and true or false)
   end
 
+  -- second persisted toggle: lay the two screens out SIDE BY SIDE (world left,
+  -- ui right) instead of stacked.  Only meaningful in the single-window path;
+  -- the second-physical-display path ignores it (world fills the panel, ui is
+  -- pushed to the other display), which is why the row is hidden there.
+  local function sideBySide()
+    return mod.save:get("sideBySide") == true
+  end
+  local function setSideBySide(on)
+    mod.save:set("sideBySide", on and true or false)
+  end
+
+  -- a second physical display is attached (Android Presentation).  Learned
+  -- from the render.compose ctx and stashed on the mod so the OPTIONS row can
+  -- see it; nil/absent bridge means single display.
+  local function secondDisplayAttached()
+    local ss = mod.secondScreen
+    return (ss and ss.available and ss.available()) and true or false
+  end
+
   -- a mod-owned snapshot of the last world frame, shown frozen on the top
   -- screen while a full-screen state (battle, title menu) covers the world
   local frozen = { canvas = nil, zones = nil, w = 0, h = 0 }
@@ -72,6 +91,17 @@ return function(mod)
         if ss and ss.setEnabled then ss.setEnabled(enabled()) end
       end,
     }
+    -- SPLIT LAYOUT (STACKED / SIDE BY SIDE): only when dual screen is on and
+    -- no second physical display is attached (on such a device the split has
+    -- no meaning, so the row is not offered).
+    if enabled() and not secondDisplayAttached() then
+      out[#out + 1] = {
+        id = "gen1recomp_ds_split",
+        label = "DS SPLIT",
+        value = function() return sideBySide() and "SIDE BY SIDE" or "STACKED" end,
+        activate = function() setSideBySide(not sideBySide()) end,
+      }
+    end
     return out
   end)
 
@@ -165,8 +195,10 @@ return function(mod)
       end
       pushSecond(ctx.uiCanvas, ctx.zones)
     else
-      -- single display: stack the two screens in the one window
-      local scale, world, ui = Layout.regions(ctx.pw, ctx.ph)
+      -- single display: place the two screens in the one window, stacked or
+      -- side by side per the DS SPLIT setting
+      local orientation = sideBySide() and "horizontal" or "vertical"
+      local scale, world, ui = Layout.regions(ctx.pw, ctx.ph, orientation)
       place(topCanvas, topZones, world, scale)
       place(ctx.uiCanvas, ctx.zones, ui, scale)
     end
