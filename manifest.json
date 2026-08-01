@@ -1,7 +1,7 @@
 {
   "id": "gen1recomp_ds",
   "name": "Dual Screen (DS-style)",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -12,5 +12,5 @@
   "dependencies": [],
   "optional_dependencies": [],
   "conflicts": [],
-  "description": "Stacks the world pass (top) and UI pass (bottom) as two Game Boy screens via the engine's render.compose seam; drives the bottom screen onto a second physical display on multi-display Android."
+  "description": "Stacks the world pass (top) and UI pass (bottom) as two Game Boy screens via the engine's render.compose seam, with a DS-native battle split (battlefield on top, command/move/text window on bottom); drives the bottom screen onto a second physical display on multi-display Android."
 }

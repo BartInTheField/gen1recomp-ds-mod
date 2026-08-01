@@ -11,6 +11,7 @@
 -- fires and the mod is inert.
 
 local Layout = nil
+local DualBattle = nil
 
 return function(mod)
   do
@@ -19,6 +20,19 @@ return function(mod)
     local chunk, err = load(src, "@" .. tostring(mod.path) .. "/layout.lua")
     if not chunk then mod.log:error("layout.lua did not compile: %s", tostring(err)); return end
     Layout = chunk()
+  end
+
+  -- optional DS battle split; fenced because dualbattle.lua requires engine
+  -- internals that a bare engine lacks (then DualBattle stays nil, base stacking)
+  do
+    local src = mod:read("dualbattle.lua")
+    if src then
+      local chunk = load(src, "@" .. tostring(mod.path) .. "/dualbattle.lua")
+      if chunk then
+        local ok, res = pcall(chunk)
+        if ok then DualBattle = res end
+      end
+    end
   end
 
   -- persisted toggle, namespaced to this mod (survives save/load)
@@ -76,6 +90,66 @@ return function(mod)
   -- second screen ignored the colour scheme.
   local shaded = { canvas = nil, w = 0, h = 0 }
 
+  -- mod-owned 160x288 DS battle surface (field top, menu bottom); lazily allocated
+  local battleSurf = { canvas = nil }
+
+  -- the live battle when it is the visible-base state, else nil (an opaque menu
+  -- over the fight drops the split); nil too if the engine internals are absent
+  local function battleState()
+    if not DualBattle then return nil end
+    local okg, Game = pcall(require, "src.core.Game")
+    local stack = okg and Game and Game.stack
+    if not (stack and stack.states) then
+      -- Game.stack is just the StateStack singleton; reach it directly if unset
+      local oks, SS = pcall(require, "src.core.StateStack")
+      stack = oks and SS or stack
+    end
+    local states = stack and stack.states
+    if type(states) ~= "table" or #states == 0 then return nil end
+    local base = 1
+    for i = #states, 1, -1 do
+      if states[i].isOpaque then base = i; break end
+    end
+    local s = states[base]
+    if not s then return nil end
+    -- battle identity: fork stamps isBattleScreen, upstream is a BattleState instance
+    local isBattle = s.isBattleScreen == true
+    if not isBattle then
+      local okb, BattleState = pcall(require, "src.battle.BattleState")
+      isBattle = okb and BattleState ~= nil and getmetatable(s) == BattleState
+    end
+    if not (isBattle and DualBattle.canDraw(s)) then return nil end
+    return s
+  end
+
+  -- re-compose the battle onto the surface (in the "ui" palette pass); nil on failure
+  local function renderBattleSurface(battle)
+    local W, H = DualBattle.WIDTH, DualBattle.HEIGHT
+    if not battleSurf.canvas then
+      battleSurf.canvas = love.graphics.newCanvas(W, H, { dpiscale = 1 })
+      battleSurf.canvas:setFilter("nearest", "nearest")
+    end
+    local okp, PaletteFX = pcall(require, "src.render.PaletteFX")
+    local hasPass = okp and type(PaletteFX) == "table"
+      and type(PaletteFX.setPass) == "function"
+    love.graphics.setCanvas(battleSurf.canvas)
+    love.graphics.clear(0, 0, 0, 1)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setShader()
+    -- restore the instance's OWN wideRegion/colorMode (rawget, usually nil) even on
+    -- error, so a swallowed mid-draw failure can't leave the live battle stubbed
+    local savedWide = rawget(battle, "wideRegion")
+    local savedColorMode = rawget(battle, "colorMode")
+    if hasPass then pcall(PaletteFX.setPass, "ui") end
+    local ok = pcall(DualBattle.draw, battle)
+    if hasPass then pcall(PaletteFX.setPass, nil) end
+    battle.wideRegion, battle.colorMode = savedWide, savedColorMode
+    love.graphics.setCanvas()
+    love.graphics.setScissor()
+    if not ok then return nil end
+    return battleSurf.canvas, DualBattle.zones()
+  end
+
   -- OPTIONS row: DUAL SCREEN (ON / OFF).  Decorate the list after next() so
   -- every other mod's rows survive.
   mod.hooks:wrap("ui.options.rows", function(next, game, rows)
@@ -130,12 +204,20 @@ return function(mod)
     -- (the player-centred GB view) rather than the top-left crop, which would
     -- push the character off toward a corner on any non-GB-multiple window.
     -- A canvas that already matches the box (the 160x144 UI) centres to a
-    -- zero offset, so it is unaffected.
-    local function place(canvas, zones, box, s)
+    -- zero offset, so it is unaffected.  With `srcY` the canvas is instead
+    -- anchored so its source row `srcY` lands at the box top -- the box height
+    -- then selects one 160x144 band out of the 160x288 battle surface (top
+    -- half = field, bottom half = menu) rather than centring the whole thing.
+    local function place(canvas, zones, box, s, srcY)
       if not (canvas and canvas.getWidth) then return end
       local cw, ch = canvas:getWidth(), canvas:getHeight()
       local oxpx = box.ox - math.floor((cw * s - box.w) / 2)
-      local oypx = box.oy - math.floor((ch * s - box.h) / 2)
+      local oypx
+      if srcY then
+        oypx = box.oy - srcY * s
+      else
+        oypx = box.oy - math.floor((ch * s - box.h) / 2)
+      end
       local psx, psy = s / ctx.dpiX, s / ctx.dpiY
       local dx, dy = oxpx / ctx.dpiX, oypx / ctx.dpiY
       local bxx, bxy = box.ox / ctx.dpiX, box.oy / ctx.dpiY
@@ -146,10 +228,13 @@ return function(mod)
 
     -- colourise `canvas` into the reused offscreen canvas at 1:1 (own DPI-less
     -- box so scissorClamped keeps every SGB zone) and hand the opaque result
-    -- to the second physical display.
-    local function pushSecond(canvas, zones)
+    -- to the second physical display.  With srcY/srcH only that source band is
+    -- pushed as its own 160x144 screen (the battle's menu half onto the display).
+    local function pushSecond(canvas, zones, srcY, srcH)
       if not (ss and ss.push and canvas and canvas.getWidth) then return end
-      local w, h = canvas:getWidth(), canvas:getHeight()
+      local w = canvas:getWidth()
+      srcY = srcY or 0
+      local h = srcH or canvas:getHeight()
       if not shaded.canvas or shaded.w ~= w or shaded.h ~= h then
         if shaded.canvas and shaded.canvas.release then shaded.canvas:release() end
         shaded.canvas = love.graphics.newCanvas(w, h, { dpiscale = 1 })
@@ -159,7 +244,7 @@ return function(mod)
       love.graphics.setCanvas(shaded.canvas)
       love.graphics.clear(0, 0, 0, 1)
       love.graphics.setColor(1, 1, 1, 1)
-      renderer:blitCanvas(canvas, 1, 1, zones, 1, 1, 0, 0, 0, 0, w, h, 1, 1)
+      renderer:blitCanvas(canvas, 1, 1, zones, 1, 1, 0, -srcY, 0, 0, w, h, 1, 1)
       love.graphics.setCanvas()
       local ok, img = pcall(function() return shaded.canvas:newImageData() end)
       if ok and img then
@@ -171,36 +256,64 @@ return function(mod)
       end
     end
 
+    -- DS battle split: re-compose the visible-base battle onto the 160x288 surface;
+    -- nil surface (no battle / internals absent) falls through to base stacking
+    local bsurf, bzones
+    do
+      local battle = battleState()
+      if battle then bsurf, bzones = renderBattleSurface(battle) end
+    end
+
     love.graphics.setCanvas()
     love.graphics.setColor(0, 0, 0, 1)
     love.graphics.rectangle("fill", 0, 0, ctx.ww, ctx.wh)
     love.graphics.setColor(1, 1, 1, 1)
 
     if physical then
-      -- second physical display attached: the main panel shows the world, the
-      -- bottom (UI) screen is colourised and pushed to the 2nd display.  The
-      -- world pass canvas is already window-view-sized (Renderer:worldViewSize
-      -- = ceil(pw/scale) x ceil(ph/scale)), so blit it exactly like normal
-      -- single-screen mode -- actual canvas dims, fit scale, centred, scissored
-      -- to the whole panel -- which fills the panel and keeps the wide aspect
-      -- (a fixed 160x144 box would show only a crop, off-centre on a wide panel).
-      if topCanvas and topCanvas.getWidth then
-        local wsp = ctx.scale
-        local wsx, wsy = wsp / ctx.dpiX, wsp / ctx.dpiY
-        local wvw, wvh = topCanvas:getWidth(), topCanvas:getHeight()
-        local wox = math.floor((ctx.pw - wvw * wsp) / 2) / ctx.dpiX
-        local woy = math.floor((ctx.ph - wvh * wsp) / 2) / ctx.dpiY
-        renderer:blitCanvas(topCanvas, wsx, wsy, topZones, wsx, wsy,
-          wox, woy, 0, 0, ctx.ww, ctx.wh, ctx.dpiX, ctx.dpiY)
+      if bsurf then
+        -- DS battle on a second-display device: the field is the main panel's
+        -- one Game Boy screen, the menu window is pushed to the second display
+        local sp = math.max(1, math.floor(math.min(ctx.pw / Layout.W, ctx.ph / Layout.H)))
+        local boxW, boxH = Layout.W * sp, Layout.H * sp
+        local panelBox = {
+          ox = math.floor((ctx.pw - boxW) / 2),
+          oy = math.floor((ctx.ph - boxH) / 2),
+          w = boxW, h = boxH,
+        }
+        place(bsurf, bzones, panelBox, sp, 0)
+        pushSecond(bsurf, bzones, DualBattle.SCREEN, DualBattle.SCREEN)
+      else
+        -- second physical display attached: the main panel shows the world, the
+        -- bottom (UI) screen is colourised and pushed to the 2nd display.  The
+        -- world pass canvas is already window-view-sized (Renderer:worldViewSize
+        -- = ceil(pw/scale) x ceil(ph/scale)), so blit it exactly like normal
+        -- single-screen mode -- actual canvas dims, fit scale, centred, scissored
+        -- to the whole panel -- which fills the panel and keeps the wide aspect
+        -- (a fixed 160x144 box would show only a crop, off-centre on a wide panel).
+        if topCanvas and topCanvas.getWidth then
+          local wsp = ctx.scale
+          local wsx, wsy = wsp / ctx.dpiX, wsp / ctx.dpiY
+          local wvw, wvh = topCanvas:getWidth(), topCanvas:getHeight()
+          local wox = math.floor((ctx.pw - wvw * wsp) / 2) / ctx.dpiX
+          local woy = math.floor((ctx.ph - wvh * wsp) / 2) / ctx.dpiY
+          renderer:blitCanvas(topCanvas, wsx, wsy, topZones, wsx, wsy,
+            wox, woy, 0, 0, ctx.ww, ctx.wh, ctx.dpiX, ctx.dpiY)
+        end
+        pushSecond(ctx.uiCanvas, ctx.zones)
       end
-      pushSecond(ctx.uiCanvas, ctx.zones)
     else
       -- single display: place the two screens in the one window, stacked or
       -- side by side per the DS SPLIT setting
       local orientation = sideBySide() and "horizontal" or "vertical"
       local scale, world, ui = Layout.regions(ctx.pw, ctx.ph, orientation)
-      place(topCanvas, topZones, world, scale)
-      place(ctx.uiCanvas, ctx.zones, ui, scale)
+      if bsurf then
+        -- battle: field half to the top/left screen, menu half to the bottom/right
+        place(bsurf, bzones, world, scale, 0)
+        place(bsurf, bzones, ui, scale, DualBattle.SCREEN)
+      else
+        place(topCanvas, topZones, world, scale)
+        place(ctx.uiCanvas, ctx.zones, ui, scale)
+      end
     end
 
     -- warp/area fade: the engine paints renderer.worldFadeAlpha over its

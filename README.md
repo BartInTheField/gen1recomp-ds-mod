@@ -20,6 +20,14 @@ An engine build with the `render.compose` seam + `Renderer:blitCanvas`
 (gen1recomp#543). On an engine without the seam the hook never fires and the mod
 is inert — nothing breaks, dual screen just isn't available.
 
+The **DS-native battle split** additionally reaches into engine internals
+through the shared Lua state: `src.core.Game`'s state stack (to find the live
+battle), that battle's `drawPicsLayer` / `drawHUDs` / `drawAnimLayer` /
+`drawTextArea`, and `src.render.PaletteFX`. This is capability-detected and
+fully fenced — on an engine that doesn't expose them, battles just keep the base
+stacking (battle on the bottom screen, frozen world on top) and nothing else is
+affected.
+
 ## Install
 
 Drop the folder into the game's `mods/` directory (or install through the mod
@@ -36,10 +44,20 @@ window: it reads the finished `worldCanvas` and `uiCanvas` (and their SGB zones)
 off the hook `ctx`, computes two 160×144 screen boxes (`layout.lua`, centred and
 integer-scaled), and blits each pass into its box through
 `ctx.renderer:blitCanvas(...)` so SGB colouring is preserved. While a full-screen
-state covers the world (a battle, a title-screen menu) the top screen holds the
+state covers the world (a title-screen menu, a shop) the top screen holds the
 last overworld frame, frozen (a mod-owned snapshot). When the option is off it
 calls `next()` and the engine composites its normal single-window frame,
 byte-for-byte.
+
+**Battle split.** When a battle is the visible-base state, the mod re-composes
+it (`dualbattle.lua`) onto a mod-owned 160×288 surface — the field drawn once
+per side (enemy high, player at the foot) on the top half, the command / move /
+text window on the bottom half — then blits the two halves into the two screen
+boxes. Redrawing each element at its DS anchor is why the move-select TYPE/PP
+box (classic rows 64–104) lands whole on the bottom screen instead of being torn
+across a crop line, and why a cross-field animation isn't sliced in two. An
+opaque menu opened over the fight (BAG, PARTY) drops the split and shows that
+menu on the bottom screen, world frozen on top.
 
 The second physical display (Android Presentation) is driven through the
 `ctx.secondScreen` bridge the seam exposes (`available` / `push` / `setEnabled`).
@@ -47,14 +65,17 @@ The second physical display (Android Presentation) is driven through the
 ```
 render.compose (engine seam)
    └── this mod: layout.lua (geometry) + blitCanvas (draw) + secondScreen (push)
+                 dualbattle.lua (battle re-compose, engine_internals)
 ```
 
-## Status (1.0.0)
+## Status (1.1.0)
 
-First stable release. Verified live on desktop (Linux) and on second-display
-Android hardware (AYN Thor). The single-display and second-display code paths
-are unit-checked in `tests/second_screen_color_test.lua`
-(run: `luajit tests/second_screen_color_test.lua`).
+The base dual-screen (stacking, side-by-side, second display) was verified live
+on desktop (Linux) and on second-display Android hardware (AYN Thor). The
+**battle split** is new in 1.1.0 and is currently covered by the unit checks
+only — it has not yet been smoke-tested against a live engine build. All paths
+are unit-checked in `tests/` (`second_screen_color_test.lua`,
+`split_layout_test.lua`, `battle_split_test.lua`; run each with `luajit`).
 
 - **In-window stack (single display):** the world and UI render as two stacked
   160×144 screens with a gutter. The window-view-sized world pass is
@@ -73,8 +94,12 @@ are unit-checked in `tests/second_screen_color_test.lua`
 - **High-DPI safe:** the mod's offscreen canvases are allocated with
   `dpiscale = 1` and pushed at their native pixel size, so the second screen is
   not sheared on high-DPI Android.
-- **Not yet ported:** the DS-native battle *split* (battlefield on top, command/
-  move/text window on bottom) is a follow-up layout on top of this base stacking.
+- **DS-native battle split:** in a battle the top screen shows the battlefield
+  (both mons + both HUDs) and the bottom screen the command / move / text
+  window, re-composed from the live battle rather than cropped from the flat
+  frame. On a second physical display the field fills the main panel and the
+  command window is pushed to the other screen. Reaches into battle internals
+  (see **Requires**); inert on engines that don't expose them.
 
 ## Layout
 
@@ -83,3 +108,4 @@ are unit-checked in `tests/second_screen_color_test.lua`
 | `manifest.json` | mod metadata (`id: gen1recomp_ds`, api 2) |
 | `layout.lua` | pure two-screen geometry, stacked or side-by-side (`regions`, `surfaceSize`, `screenAt`) |
 | `main.lua` | options row + `render.compose` hook (stacking, freeze, second display) |
+| `dualbattle.lua` | DS battle re-compose onto a 160×288 surface (`draw`, `zones`, `canDraw`); reaches into BattleState draw methods + PaletteFX |
