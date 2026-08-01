@@ -50,6 +50,13 @@ return function(mod)
     frozen.zones = zones
   end
 
+  -- palette-shaded copy of a screen, reused across frames.  The image handed
+  -- to a second physical display must carry the SGB/GBC colours the window
+  -- blit applies through the shade-remap shader -- the raw uiCanvas is the
+  -- un-colourised 4-shade DMG surface, and pushing it verbatim is why the
+  -- second screen ignored the colour scheme.
+  local shaded = { canvas = nil, w = 0, h = 0 }
+
   -- OPTIONS row: DUAL SCREEN (ON / OFF).  Decorate the list after next() so
   -- every other mod's rows survive.
   mod.hooks:wrap("ui.options.rows", function(next, game, rows)
@@ -74,13 +81,9 @@ return function(mod)
     if not enabled() then return next() end
 
     mod.secondScreen = ctx.secondScreen
-    local scale, world, ui = Layout.regions(ctx.pw, ctx.ph)
-    local sx, sy = scale / ctx.dpiX, scale / ctx.dpiY
-
-    -- keep the second display in sync with the toggle
-    if ctx.secondScreen and ctx.secondScreen.setEnabled then
-      ctx.secondScreen.setEnabled(true)
-    end
+    local ss = ctx.secondScreen
+    local physical = ss and ss.available and ss.available()
+    if ss and ss.setEnabled then ss.setEnabled(true) end
 
     -- freeze the world while an opaque full-screen state covers it
     if ctx.worldActive then
@@ -89,31 +92,65 @@ return function(mod)
     local topCanvas = ctx.worldActive and ctx.worldCanvas or (frozen.canvas or ctx.worldCanvas)
     local topZones = ctx.worldActive and (ctx.worldZones or ctx.zones) or frozen.zones
 
-    -- black window, then each pass palette-correct into its screen box (units)
+    -- palette-correct blit of a screen `canvas` (with its SGB `zones`) into a
+    -- window box at integer scale `s`; going through Renderer:blitCanvas is
+    -- what applies the shade-remap shader, so colours match the window.
+    local function place(canvas, zones, box, s)
+      if not (canvas and canvas.getWidth) then return end
+      local psx, psy = s / ctx.dpiX, s / ctx.dpiY
+      local bx, by = box.ox / ctx.dpiX, box.oy / ctx.dpiY
+      local bw, bh = box.w / ctx.dpiX, box.h / ctx.dpiY
+      renderer:blitCanvas(canvas, psx, psy, zones, psx, psy, bx, by, bx, by, bw, bh,
+        ctx.dpiX, ctx.dpiY)
+    end
+
+    -- colourise `canvas` into the reused offscreen canvas at 1:1 (own DPI-less
+    -- box so scissorClamped keeps every SGB zone) and hand the opaque result
+    -- to the second physical display.
+    local function pushSecond(canvas, zones)
+      if not (ss and ss.push and canvas and canvas.getWidth) then return end
+      local w, h = canvas:getWidth(), canvas:getHeight()
+      if not shaded.canvas or shaded.w ~= w or shaded.h ~= h then
+        if shaded.canvas and shaded.canvas.release then shaded.canvas:release() end
+        shaded.canvas = love.graphics.newCanvas(w, h)
+        shaded.canvas:setFilter("nearest", "nearest")
+        shaded.w, shaded.h = w, h
+      end
+      love.graphics.setCanvas(shaded.canvas)
+      love.graphics.clear(0, 0, 0, 1)
+      love.graphics.setColor(1, 1, 1, 1)
+      renderer:blitCanvas(canvas, 1, 1, zones, 1, 1, 0, 0, 0, 0, w, h, 1, 1)
+      love.graphics.setCanvas()
+      local ok, img = pcall(function() return shaded.canvas:newImageData() end)
+      if ok and img then
+        pcall(ss.push, img, w, h)
+        if img.release then img:release() end
+      end
+    end
+
     love.graphics.setCanvas()
     love.graphics.setColor(0, 0, 0, 1)
     love.graphics.rectangle("fill", 0, 0, ctx.ww, ctx.wh)
     love.graphics.setColor(1, 1, 1, 1)
 
-    local function place(canvas, zones, box)
-      if not (canvas and canvas.getWidth) then return end
-      local bx, by = box.ox / ctx.dpiX, box.oy / ctx.dpiY
-      local bw, bh = box.w / ctx.dpiX, box.h / ctx.dpiY
-      renderer:blitCanvas(canvas, sx, sy, zones, sx, sy, bx, by, bx, by, bw, bh,
-        ctx.dpiX, ctx.dpiY)
-    end
-    place(topCanvas, topZones, world)
-    place(ctx.uiCanvas, ctx.zones, ui)
-
-    -- multi-display Android: mirror the bottom (UI) screen onto the second
-    -- physical display when one is attached
-    local ss = ctx.secondScreen
-    if ss and ss.available and ss.available() and ss.push and ctx.uiCanvas.newImageData then
-      local ok, img = pcall(function() return ctx.uiCanvas:newImageData() end)
-      if ok and img then
-        pcall(ss.push, img, ctx.uiCanvas:getWidth(), ctx.uiCanvas:getHeight())
-        if img.release then img:release() end
-      end
+    if physical then
+      -- a second physical display is attached: each panel holds one Game Boy
+      -- screen.  The main window shows the top (world) screen filling the
+      -- panel; the bottom (UI) screen is colourised and pushed to the second
+      -- display.
+      local sp = math.max(1, math.floor(math.min(ctx.pw / Layout.W, ctx.ph / Layout.H)))
+      local bw, bh = Layout.W * sp, Layout.H * sp
+      local panel = {
+        ox = math.floor((ctx.pw - bw) / 2), oy = math.floor((ctx.ph - bh) / 2),
+        w = bw, h = bh,
+      }
+      place(topCanvas, topZones, panel, sp)
+      pushSecond(ctx.uiCanvas, ctx.zones)
+    else
+      -- single display: stack the two screens in the one window
+      local scale, world, ui = Layout.regions(ctx.pw, ctx.ph)
+      place(topCanvas, topZones, world, scale)
+      place(ctx.uiCanvas, ctx.zones, ui, scale)
     end
 
     return true

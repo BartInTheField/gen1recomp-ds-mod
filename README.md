@@ -48,14 +48,16 @@ render.compose (engine seam)
 
 ## Status
 
-- **Implemented & unit-checked:** the layout geometry (`layout.lua`) and the
-  hook wiring/contract against the seam (mirrors the engine's
-  `tests/engine/render_compose_seam.lua`).
-- **Needs on-device verification:** the actual two-screen rendering, the frozen
-  top-screen behaviour, and the Android second-display path require the LÖVE
-  runtime (and, for the second display, multi-display Android hardware such as
-  the AYN Thor). These were verified in the original fork; re-confirm here once
-  the engine seam lands.
+- **Working:** desktop (Linux) in-window stacking, verified live. The
+  single-display and second-display code paths are unit-checked in
+  `tests/second_screen_color_test.lua` (run: `luajit tests/second_screen_color_test.lua`).
+- **0.1.1 fix (second physical display, e.g. AYN Thor):**
+  - the bottom screen now respects the colour scheme — the UI is drawn through
+    the engine's palette shader (`Renderer:blitCanvas`) into an offscreen canvas
+    before it is pushed, instead of pushing the raw un-colourised DMG canvas;
+  - on a second-display device each physical panel holds one screen — the main
+    panel is filled with the top (world) screen rather than the whole two-screen
+    stack, and the bottom (UI) screen goes to the second display.
 - **Not yet ported:** the DS-native battle *split* (battlefield on top, command/
   move/text window on bottom) is a follow-up layout on top of this base stacking.
 
