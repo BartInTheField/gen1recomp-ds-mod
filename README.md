@@ -69,13 +69,16 @@ render.compose (engine seam)
                  dualbattle.lua (battle re-compose, engine_internals)
 ```
 
-## Status (1.1.0)
+## Status (2026.8.1+1)
 
-The base dual-screen (stacking, side-by-side, second display) was verified live
-on desktop (Linux) and on second-display Android hardware (AYN Thor). The
-**battle split** is new in 1.1.0 and is currently covered by the unit checks
-only — it has not yet been smoke-tested against a live engine build. All paths
-are unit-checked in `tests/` (`second_screen_color_test.lua`,
+Versioning is CalVer on a semver-parse-safe form: `YYYY.M.D+N`, where `N` (semver
+build metadata, discarded on parse) is the release of the day. This is the first
+CalVer release, superseding the old 1.x semver line. The base dual-screen
+(stacking, side-by-side, second display) was verified live on desktop (Linux)
+and on second-display Android hardware (AYN Thor). The **battle split** and the
+single-row live layout cycle are the newest additions, currently covered by the
+unit checks only — the battle split has not yet been smoke-tested against a live
+engine build. All paths are unit-checked in `tests/` (`second_screen_color_test.lua`,
 `split_layout_test.lua`, `battle_split_test.lua`; run each with `luajit`).
 
 - **In-window stack (single display):** the world and UI render as two stacked
