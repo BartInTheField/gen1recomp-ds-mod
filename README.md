@@ -64,6 +64,13 @@ render.compose (engine seam)
   reported the logical 160×144 — a row-stride mismatch. The mod now allocates
   its offscreen canvases with `dpiscale = 1` and pushes the image's own pixel
   dimensions. (Desktop was unaffected: `dpiscale` is 1 there.)
+- **0.1.3 fix (top-screen centring + wide aspect):** the world pass canvas is
+  window-view-sized (`Renderer:worldViewSize` = `ceil(pw/scale) × ceil(ph/scale)`),
+  so drawing it into a fixed 160×144 box showed only the top-left crop —
+  off-centre on any non-GB-multiple panel (the Thor). On a second display the
+  world now fills the whole main panel, centred, preserving the wide aspect
+  (like normal single-screen mode); in the in-window stack the wide world is
+  centre-cropped into its screen box so the player stays centred.
 - **Not yet ported:** the DS-native battle *split* (battlefield on top, command/
   move/text window on bottom) is a follow-up layout on top of this base stacking.
 

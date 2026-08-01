@@ -94,13 +94,23 @@ return function(mod)
 
     -- palette-correct blit of a screen `canvas` (with its SGB `zones`) into a
     -- window box at integer scale `s`; going through Renderer:blitCanvas is
-    -- what applies the shade-remap shader, so colours match the window.
+    -- what applies the shade-remap shader, so colours match the window.  The
+    -- canvas is CENTRED in the box: the world pass is window-view-sized
+    -- (Renderer:worldViewSize), so a fixed 160x144 box must show its centre
+    -- (the player-centred GB view) rather than the top-left crop, which would
+    -- push the character off toward a corner on any non-GB-multiple window.
+    -- A canvas that already matches the box (the 160x144 UI) centres to a
+    -- zero offset, so it is unaffected.
     local function place(canvas, zones, box, s)
       if not (canvas and canvas.getWidth) then return end
+      local cw, ch = canvas:getWidth(), canvas:getHeight()
+      local oxpx = box.ox - math.floor((cw * s - box.w) / 2)
+      local oypx = box.oy - math.floor((ch * s - box.h) / 2)
       local psx, psy = s / ctx.dpiX, s / ctx.dpiY
-      local bx, by = box.ox / ctx.dpiX, box.oy / ctx.dpiY
+      local dx, dy = oxpx / ctx.dpiX, oypx / ctx.dpiY
+      local bxx, bxy = box.ox / ctx.dpiX, box.oy / ctx.dpiY
       local bw, bh = box.w / ctx.dpiX, box.h / ctx.dpiY
-      renderer:blitCanvas(canvas, psx, psy, zones, psx, psy, bx, by, bx, by, bw, bh,
+      renderer:blitCanvas(canvas, psx, psy, zones, psx, psy, dx, dy, bxx, bxy, bw, bh,
         ctx.dpiX, ctx.dpiY)
     end
 
@@ -137,17 +147,22 @@ return function(mod)
     love.graphics.setColor(1, 1, 1, 1)
 
     if physical then
-      -- a second physical display is attached: each panel holds one Game Boy
-      -- screen.  The main window shows the top (world) screen filling the
-      -- panel; the bottom (UI) screen is colourised and pushed to the second
-      -- display.
-      local sp = math.max(1, math.floor(math.min(ctx.pw / Layout.W, ctx.ph / Layout.H)))
-      local bw, bh = Layout.W * sp, Layout.H * sp
-      local panel = {
-        ox = math.floor((ctx.pw - bw) / 2), oy = math.floor((ctx.ph - bh) / 2),
-        w = bw, h = bh,
-      }
-      place(topCanvas, topZones, panel, sp)
+      -- second physical display attached: the main panel shows the world, the
+      -- bottom (UI) screen is colourised and pushed to the 2nd display.  The
+      -- world pass canvas is already window-view-sized (Renderer:worldViewSize
+      -- = ceil(pw/scale) x ceil(ph/scale)), so blit it exactly like normal
+      -- single-screen mode -- actual canvas dims, fit scale, centred, scissored
+      -- to the whole panel -- which fills the panel and keeps the wide aspect
+      -- (a fixed 160x144 box would show only a crop, off-centre on a wide panel).
+      if topCanvas and topCanvas.getWidth then
+        local wsp = ctx.scale
+        local wsx, wsy = wsp / ctx.dpiX, wsp / ctx.dpiY
+        local wvw, wvh = topCanvas:getWidth(), topCanvas:getHeight()
+        local wox = math.floor((ctx.pw - wvw * wsp) / 2) / ctx.dpiX
+        local woy = math.floor((ctx.ph - wvh * wsp) / 2) / ctx.dpiY
+        renderer:blitCanvas(topCanvas, wsx, wsy, topZones, wsx, wsy,
+          wox, woy, 0, 0, ctx.ww, ctx.wh, ctx.dpiX, ctx.dpiY)
+      end
       pushSecond(ctx.uiCanvas, ctx.zones)
     else
       -- single display: stack the two screens in the one window

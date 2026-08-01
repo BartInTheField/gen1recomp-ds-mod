@@ -66,7 +66,7 @@ local renderer = {
   blitCanvas = function(self, canvas, sx, sy, zones, zsx, zsy, bx, by,
                         boxX, boxY, boxW, boxH, dpiX, dpiY)
     blits[#blits + 1] = { canvas = canvas, target = G.target, sx = sx,
-                          boxW = boxW, boxH = boxH, zones = zones }
+                          bx = bx, boxX = boxX, boxW = boxW, boxH = boxH, zones = zones }
   end,
 }
 
@@ -98,7 +98,10 @@ check(hooks["render.compose"] ~= nil, "mod registers a render.compose hook")
 -- turn the option on (as the OPTIONS row would)
 saved.enabled = true
 
-local worldCanvas = newCanvas(160, 144)
+-- world pass is window-view-sized (Renderer:worldViewSize = ceil(pw/scale) x
+-- ceil(ph/scale)); on the 800x480 @scale 3 "panel" that is 268x160, wider
+-- than a GB screen -- the case that broke centring on the Thor.
+local worldCanvas = newCanvas(268, 160)
 local uiCanvas = newCanvas(160, 144)
 local zones = { { x = 0, y = 0, w = 160, h = 144, colors = { 1, 2, 3, 4 } } }
 local ctx = {
@@ -138,14 +141,19 @@ for i = baseCanvas + 1, #newCanvases do
     "every mod-owned offscreen canvas is created with dpiscale=1")
 end
 
--- (2) layout: the world screen fills the main panel (blitted to the window,
--- target == nil) at the panel-fit scale 3, not the in-window stack scale
+-- (2) layout: on a second-display device the world FILLS the main panel (wide
+-- aspect preserved) and is centred -- not a fixed 160x144 box. It is blitted
+-- to the window (target == nil) at the fit scale.
 local worldOnPanel = nil
 for _, b in ipairs(blits) do
   if b.canvas == worldCanvas and b.target == nil then worldOnPanel = b end
 end
 check(worldOnPanel ~= nil, "the world screen is drawn to the main window panel")
-check(worldOnPanel.sx == 3, "the world fills the main panel at the panel-fit scale (3)")
+check(worldOnPanel.sx == 3, "the world is drawn at the fit scale (3)")
+check(worldOnPanel.boxW == ctx.ww,
+  "the world fills the whole main panel (wide aspect preserved), not a 160x144 box")
+check(worldOnPanel.bx == math.floor((ctx.pw - 268 * 3) / 2) / ctx.dpiX,
+  "the wide world is centred on the panel")
 -- and the UI is NOT stacked into the same window on a second-display device
 local uiOnWindow = false
 for _, b in ipairs(blits) do
@@ -166,14 +174,20 @@ ctx.secondScreen = singleScreen
 local handled2 = hooks["render.compose"](function() return false end, renderer, ctx)
 check(handled2 == true, "single display: the mod still takes over composition")
 check(#pushed == 0, "single display: nothing is pushed")
-local worldStacked, uiStacked = false, false
-local stackScale = select(1, dofile("layout.lua").regions(ctx.pw, ctx.ph))
+local worldStacked, uiStacked = nil, nil
+local stackScale, worldBox, uiBox = dofile("layout.lua").regions(ctx.pw, ctx.ph)
 for _, b in ipairs(blits) do
-  if b.target == nil and b.canvas == worldCanvas and b.sx == stackScale then worldStacked = true end
-  if b.target == nil and b.canvas == uiCanvas and b.sx == stackScale then uiStacked = true end
+  if b.target == nil and b.canvas == worldCanvas then worldStacked = b end
+  if b.target == nil and b.canvas == uiCanvas then uiStacked = b end
 end
-check(worldStacked, "single display: the world screen is stacked in the window")
-check(uiStacked, "single display: the UI screen is stacked in the window")
+check(worldStacked ~= nil and worldStacked.sx == stackScale,
+  "single display: the world screen is stacked at the layout scale")
+check(worldStacked ~= nil and worldStacked.boxW == worldBox.w,
+  "single display: the world is drawn into the 160-wide top screen box")
+check(worldStacked ~= nil and worldStacked.bx < worldStacked.boxX,
+  "single display: the wide world is centre-cropped in the box, not top-left")
+check(uiStacked ~= nil and uiStacked.boxW == uiBox.w and uiStacked.bx == uiStacked.boxX,
+  "single display: the 160x144 UI stacks with no crop offset")
 
 print(string.format("second_screen_color_test: %d checks passed", calls))
 end)
